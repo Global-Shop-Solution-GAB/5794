@@ -1,0 +1,160 @@
+Program.Sub.ScreenSU.Start
+Gui.fmMSG..Create
+Gui.fmMSG..Size(6825,1815)
+Gui.fmMSG..MinX(0)
+Gui.fmMSG..MinY(0)
+Gui.fmMSG..Position(0,0)
+Gui.fmMSG..BackColor(-2147483633)
+Gui.fmMSG..MousePointer(0)
+Gui.fmMSG..Caption("Final labor sequence")
+Gui.fmMSG..FontSize(12)
+Gui.fmMSG..Event(UnLoad,fmMSG_UnLoad)
+Gui.fmMSG..AlwaysOnTop(True)
+Gui.fmMSG..ControlBox(False)
+Gui.fmMSG..MaxButton(False)
+Gui.fmMSG..MinButton(False)
+Gui.fmMSG..Moveable(False)
+Gui.fmMSG.lbl1.Create(Label,"Do you wish to close the work order and clear commitments?",True,6450,315,0,60,150,True,0,"Arial",12,-2147483633,0)
+Gui.fmMSG.cmdYES.Create(Button)
+Gui.fmMSG.cmdYES.Size(1395,570)
+Gui.fmMSG.cmdYES.Position(1305,465)
+Gui.fmMSG.cmdYES.Caption("YES")
+Gui.fmMSG.cmdYES.FontSize(16)
+Gui.fmMSG.cmdYES.FontStyle(True,False,False,False,False)
+Gui.fmMSG.cmdYES.Event(Click,cmdYES_Click)
+Gui.fmMSG.cmdNO.Create(Button)
+Gui.fmMSG.cmdNO.Size(1395,570)
+Gui.fmMSG.cmdNO.Position(3450,465)
+Gui.fmMSG.cmdNO.Caption("NO")
+Gui.fmMSG.cmdNO.FontSize(16)
+Gui.fmMSG.cmdNO.FontStyle(True,False,False,False,False)
+Gui.fmMSG.cmdNO.Event(Click,cmdNO_Click)
+Program.Sub.ScreenSU.End
+
+Program.Sub.Preflight.Start
+V.Global.sJOB.Declare
+V.Global.sSUFFIX.Declare
+V.Global.sSEQ.Declare
+Program.Sub.Preflight.End
+
+Program.Sub.Main.Start
+'TJS DEC 2019
+'Customer: Harding Group
+'Customer currently can close a WO short, but they cant do it thru the GUI so they have to go to Supervisor Job Maintenance in order to 
+'close it short, but that adds more overhead and time. We need to find a solution where the user from the GUI can close the WO short. 
+'Proposed Solution: From the GUi we are going to enable that transaction to close the WO directly from there.
+'Hook: 15890 (OLS003-PB-PROCESS-POST-HOOK)
+'Standard Company Option>Manufacturing-->Transfer and Backflush at Op-Code must be set to "W2FG" and Op-Code set on final labor sequence.
+
+F.Intrinsic.Control.Try
+V.Local.sSQL.Declare
+V.Local.sDEL.Declare
+V.Local.iRET.Declare
+
+F.Intrinsic.Control.SelectCase(V.Caller.Hook)
+	F.Intrinsic.Control.Case(15890)
+	F.Intrinsic.Control.If(V.Passed.000003.Trim,<>,"Y")
+		F.Intrinsic.Control.End
+	F.Intrinsic.Control.EndIf
+		V.Global.sJOB.Set(V.Passed.000004.Trim)
+		F.Intrinsic.String.Split(V.Global.sJOB,"-",V.Global.sJOB)
+		V.Global.sSUFFIX.Set(V.Global.sJOB(1))
+		V.Global.sJOB.RedimPreserve(0,0)
+		V.Global.sSEQ.Set(V.Passed.000005.Trim)
+		F.Intrinsic.String.LPad(V.Global.sSEQ,"0",6,V.Global.sSEQ)
+		F.Intrinsic.String.Build("Select OPERATION from V_JOB_OPERATIONS where JOB = '{0}' and SUFFIX = '{1}' and SEQ = '{2}'",V.Global.sJOB.Trim,V.Global.sSUFFIX.Trim,V.Global.sSEQ.Trim,V.Local.sSQL)
+		F.ODBC.Connection!conts.OpenCompanyConnection
+		F.ODBC.Connection!conts.ExecuteAndReturn(V.Local.sSQL,V.Local.sSQL)
+	F.Intrinsic.Control.If(V.Local.sSQL.Trim,=,"W2FG","and",V.Ambient.ExecuteAndReturnEOF,=,False)
+		F.Intrinsic.Control.CallSub(SetIcon)
+		Gui.fmMSG..Show
+	F.Intrinsic.Control.Else
+		F.ODBC.Connection!conts.Close
+		F.Intrinsic.Control.End
+	F.Intrinsic.Control.EndIf
+		F.ODBC.Connection!conts.Close
+	F.Intrinsic.Control.CaseElse
+		F.Intrinsic.Control.End
+F.Intrinsic.Control.EndSelect
+
+F.Intrinsic.Control.Catch
+	F.Intrinsic.Control.CallSub(Error,"SubRoutine",V.Ambient.CurrentSubroutine,"eNumber",V.Ambient.ErrorNumber,"eDescription",V.Ambient.ErrorDescription)
+F.Intrinsic.Control.EndTry
+Program.Sub.Main.End
+
+Program.Sub.cmdYES_Click.Start
+F.Intrinsic.Control.Try
+V.Local.sDate.Declare
+V.Local.sDEL.Declare
+
+F.ODBC.Connection!conts.OpenCompanyConnection
+F.Intrinsic.String.Format(V.Ambient.Date,"YYYYMMDD",V.Local.sDate)
+
+F.Global.Callwrapper.New("WOClose","Manufacturing.CloseWorkOrder")
+F.Global.Callwrapper.SetProperty("WOClose","BeginningWorkOrder",V.Global.sJOB.Trim)
+F.Global.Callwrapper.SetProperty("WOClose","BeginningWorkOrderSuffix",V.Global.sSUFFIX.Trim)
+F.Global.Callwrapper.SetProperty("WOClose","CloseDate",V.Local.sDate)
+F.Global.CallWrapper.Run("WOClose")
+F.Intrinsic.String.Build("delete JOB_COMMITMENTS where JOB = '{0}' and SUFFIX = '{1}'",V.Global.sJOB.Trim,V.Global.sSUFFIX.Trim,V.Local.sDEL)
+F.ODBC.Connection!conts.Execute(V.Local.sDEL)
+F.ODBC.Connection!conts.Close
+
+F.Intrinsic.Control.CallSub(fmMSG_UnLoad)
+
+F.Intrinsic.Control.Catch
+	F.Intrinsic.Control.CallSub(Error,"SubRoutine",V.Ambient.CurrentSubroutine,"eNumber",V.Ambient.ErrorNumber,"eDescription",V.Ambient.ErrorDescription)
+F.Intrinsic.Control.EndTry
+Program.Sub.cmdYES_Click.End
+
+Program.Sub.cmdNO_Click.Start
+F.Intrinsic.Control.Try
+
+F.Intrinsic.Control.CallSub(fmMSG_Unload)
+
+F.Intrinsic.Control.Catch
+	F.Intrinsic.Control.CallSub(Error,"SubRoutine",V.Ambient.CurrentSubroutine,"eNumber",V.Ambient.ErrorNumber,"eDescription",V.Ambient.ErrorDescription)
+F.Intrinsic.Control.EndTry
+Program.Sub.cmdNO_Click.End
+
+Program.Sub.SetIcon.Start
+F.Intrinsic.Control.Try
+V.Local.sForm.Declare
+V.Local.bExists.Declare
+V.Local.sIcon.Declare
+V.Local.iCounter.Declare
+
+F.Intrinsic.String.Build("{0}\ART\gss2.ico",V.Caller.GlobalDir,v.Local.sIcon)
+F.Intrinsic.File.Exists(V.Local.sIcon, V.Local.bExists)
+F.Intrinsic.Control.If(V.Local.bExists.Not)
+    F.Intrinsic.String.Build("{0}\GAB\GAS\gss2.ico",V.Caller.PluginsDir,v.Local.sIcon)
+    F.Intrinsic.File.Exists(V.Local.sIcon, V.Local.bExists)
+    F.Intrinsic.Control.If(V.Local.bExists.Not)
+        F.Intrinsic.Control.ExitSub
+    F.Intrinsic.Control.EndIf
+F.Intrinsic.Control.EndIf
+
+F.Intrinsic.UI.GetFormList(V.Local.sForm)
+F.Intrinsic.String.Split(V.Local.sForm, "*!*", V.Local.sForm)
+
+F.Intrinsic.Control.For(V.Local.iCounter, 0, V.Local.sForm.UBound, 1)
+    Gui.[V.Local.sForm(V.Local.iCounter)]..Icon(V.Local.sIcon)
+F.Intrinsic.Control.Next(V.Local.iCounter)
+
+F.Intrinsic.Control.Catch
+	F.Intrinsic.Control.CallSub(Error,"SubRoutine",V.Ambient.CurrentSubroutine,"eNumber",V.Ambient.ErrorNumber,"eDescription",V.Ambient.ErrorDescription)
+F.Intrinsic.Control.EndTry
+Program.Sub.SetIcon.End
+
+Program.Sub.fmMSG_UnLoad.Start
+F.Intrinsic.Control.End
+Program.Sub.fmMSG_UnLoad.End
+
+Program.Sub.Error.Start
+V.Local.sError.Declare
+V.Local.iRet.Declare
+V.Local.sSep.Declare
+
+F.Intrinsic.String.Build("-------------------------------------------------------------------------------------",,V.Local.sSep)
+F.Intrinsic.String.Build("({5}-{6}){0}{7}{0}Project: {4}{0}{7}{0}Sub: {1}{0}Error: {2}, {3}", V.Ambient.NewLine, V.Args.SubRoutine, V.Args.eNumber, V.Args.eDescription,V.Caller.ScriptFile,V.Ambient.Date, V.Ambient.Time,V.Local.sSep,V.Local.sError)
+F.Intrinsic.UI.Msgbox(V.Local.sError,"Error",V.Local.iRet)
+Program.Sub.Error.End
